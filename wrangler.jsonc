@@ -2,6 +2,7 @@
   // Nama harus sama persis dengan nama Worker di dashboard Cloudflare.
   "name": "titip-jajan-1",
   "main": "worker.mjs",
+"workers_dev": true,
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
