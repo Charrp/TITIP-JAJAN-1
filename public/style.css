@@ -198,6 +198,7 @@ textarea.in{resize:vertical;min-height:110px}
 .meta dt{color:var(--ink-2)}
 .meta dd{overflow-wrap:anywhere;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .copy{min-height:30px;padding:0 10px;border:1.5px solid var(--line);border-radius:8px;background:var(--surface-2);font-size:13px;font-weight:600;cursor:pointer}
+a.copy{display:inline-flex;align-items:center;color:inherit;text-decoration:none}
 .copy:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .req-act{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto;padding-top:4px}
 .empty{padding:28px 18px;text-align:center;border:1.5px dashed var(--line);border-radius:12px;color:var(--ink-2)}

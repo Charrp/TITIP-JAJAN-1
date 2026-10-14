@@ -84,6 +84,11 @@
     if (!d) return '';
     return d.nama + (o.kec ? ', ' + o.kec : '');
   }
+  /* Tautan Google Maps: alamat atau patokan + kecamatan + daerah, supaya hasil pencarian tepat. */
+  function mapsUrl(o) {
+    var q = [o.alamat, o.kec, DAERAH[o.daerah] ? DAERAH[o.daerah].nama : ''].filter(Boolean).join(', ');
+    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+  }
   function rp(n) { return 'Rp ' + String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
 
   /* Toast */
@@ -133,7 +138,7 @@
     $: $, pad: pad, lsGet: lsGet, lsSet: lsSet, lsDel: lsDel, h: h,
     ymd: ymd, addDays: addDays, splitYmd: splitYmd, parseSched: parseSched, dayDiff: dayDiff,
     fmtJam: fmtJam, labelTanggal: labelTanggal, fullTanggal: fullTanggal, stampTime: stampTime,
-    normHp: normHp, fmtHp: fmtHp, daerahText: daerahText, rp: rp,
+    normHp: normHp, fmtHp: fmtHp, daerahText: daerahText, mapsUrl: mapsUrl, rp: rp,
     toast: toast, copyText: copyText, api: api
   };
 })();

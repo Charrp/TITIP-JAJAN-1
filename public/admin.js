@@ -255,7 +255,7 @@
       h('dl', { class: 'meta' },
         it.kode ? metaRow('Nota', it.kode) : null,
         metaRow('Daerah', T.daerahText(it) || '-'),
-        it.alamat ? metaRow('Alamat', it.alamat) : null,
+        it.alamat ? metaRow('Alamat', [h('span', null, it.alamat), h('a', { class: 'copy maps', href: T.mapsUrl(it), target: '_blank', rel: 'noopener' }, 'Buka Maps')]) : null,
         metaRow('HP', phone),
         it.email ? metaRow('Email', it.email) : null,
         Number(it.biaya) > 0 ? metaRow('Bayar', T.rp(it.biaya) + ', ' + (it.bayar === 'lunas' ? 'lunas' : 'belum dibayar')) : null),
