@@ -1,0 +1,13 @@
+{
+  // Nama harus sama persis dengan nama Worker di dashboard Cloudflare.
+  "name": "tolong-dong",
+  "main": "worker.mjs",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "run_worker_first": true
+  }
+}

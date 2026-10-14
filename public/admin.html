@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Tolong Dong Admin</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=Courier+Prime:wght@400;700&family=Figtree:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="admin">
+<div class="shell">
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true">!</span><span class="word">Tolong Dong</span></div>
+    <div class="top-tools" id="tools" hidden>
+      <nav class="tabs" aria-label="Tampilan">
+        <button type="button" class="tab" id="tab-papan" aria-pressed="true">Papan <span class="tab-count" id="tab-count" hidden>0</span></button>
+        <button type="button" class="tab" id="tab-bayar" aria-pressed="false">Pembayaran</button>
+      </nav>
+      <a class="link" href="/" target="_blank" rel="noopener">Halaman pelanggan</a>
+      <a class="link" href="/api/admin/export.csv">Unduh CSV</a>
+      <button type="button" class="link" id="btn-logout">Keluar</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-login" class="login" hidden>
+      <form class="form" id="login-form" novalidate>
+        <h1>Masuk admin</h1>
+        <div class="field">
+          <label for="f-pass">Password</label>
+          <input class="in" id="f-pass" name="password" type="password" autocomplete="current-password" aria-describedby="e-pass">
+          <p class="err" id="e-pass" hidden></p>
+        </div>
+        <button type="submit" class="btn" id="btn-login">Masuk</button>
+        <p class="note">Password diatur lewat ADMIN_PASSWORD di pengaturan hosting.</p>
+      </form>
+    </section>
+
+    <section id="view-papan" hidden>
+      <div class="board-head">
+        <div>
+          <h2>Papan permintaan</h2>
+          <p class="muted">Pesanan dari halaman pelanggan masuk ke sini otomatis. Halaman ini memuat ulang sendiri tiap beberapa detik.</p>
+        </div>
+      </div>
+      <div class="form paste" id="paste">
+        <div class="field">
+          <label for="f-tempel">Catat pesanan manual dari WhatsApp</label>
+          <textarea class="in" id="f-tempel" rows="3" placeholder="Salin pesan dari WhatsApp pelanggan, lalu tempel di sini. Datanya terisi otomatis."></textarea>
+        </div>
+        <div id="paste-out"></div>
+      </div>
+      <div class="filters" id="filters"></div>
+      <div class="grid" id="board-list"></div>
+    </section>
+
+    <section id="view-bayar" hidden>
+      <div class="board-head">
+        <div>
+          <h2>Pembayaran</h2>
+          <p class="muted">Catat biaya dan status bayar tiap permintaan, lalu kirim tagihan lewat WhatsApp. Pelanggan membayar lewat transfer, QRIS, atau tunai. Halaman ini tidak memproses uang, jadi kamu yang menandai lunas.</p>
+        </div>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div class="form paybox">
+        <div class="field">
+          <label for="f-info">Info pembayaran untuk pelanggan</label>
+          <textarea class="in" id="f-info" rows="3" maxlength="300" placeholder="Contoh: Transfer BCA 0000000000 a.n. Nama Kamu, atau minta QRIS lewat chat."></textarea>
+        </div>
+        <div class="submit">
+          <button type="button" class="btn small" id="btn-info">Simpan info</button>
+          <span class="note">Teks ini tampil di layar pelanggan dan ikut tertulis di pesan tagihan.</span>
+        </div>
+      </div>
+      <div class="filters" id="bfilters"></div>
+      <div class="grid" id="pay-list"></div>
+    </section>
+  </main>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/common.js"></script>
+<script src="/admin.js"></script>
+</body>
+</html>

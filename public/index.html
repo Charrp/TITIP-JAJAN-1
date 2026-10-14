@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minta Tolong Dong</title>
+<meta name="description" content="Titip, antar, antre, dan bantu-bantu lainnya di Jakarta Selatan dan Depok.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=Courier+Prime:wght@400;700&family=Figtree:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="consumer">
+<div class="app">
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true">!</span><span class="word">Tolong Dong</span></div>
+    <span class="area">Jakarta Selatan<br>dan Depok</span>
+  </header>
+
+  <section class="hero" id="intro">
+    <h1>Ada yang perlu dibantu?</h1>
+    <p>Jawab tiga pertanyaan singkat. Permintaanmu langsung masuk ke kami.</p>
+  </section>
+
+  <ol class="steps" id="steps" aria-label="Langkah"></ol>
+
+  <form id="wiz" novalidate autocomplete="on">
+    <section class="card step" id="s1" data-step="1">
+      <h2 class="step-title" tabindex="-1">Siapa kamu?</h2>
+      <div class="field">
+        <label for="f-nama">Nama</label>
+        <input class="in" id="f-nama" name="nama" type="text" autocomplete="name" maxlength="60" placeholder="Nama lengkap atau panggilan" aria-describedby="e-nama">
+        <p class="err" id="e-nama" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-hp">No. HP (WhatsApp)</label>
+        <input class="in" id="f-hp" name="hp" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="0812 3456 7890" aria-describedby="e-hp">
+        <p class="err" id="e-hp" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-email">Email <span class="hint">(opsional)</span></label>
+        <input class="in" id="f-email" name="email" type="email" inputmode="email" autocomplete="email" maxlength="80" placeholder="nama@email.com" aria-describedby="e-email">
+        <p class="err" id="e-email" hidden></p>
+      </div>
+      <label class="check" for="f-ingat"><input type="checkbox" id="f-ingat"> Ingat nama dan nomor saya di perangkat ini</label>
+    </section>
+
+    <section class="card step" id="s2" data-step="2" hidden>
+      <h2 class="step-title" tabindex="-1">Apa yang perlu dibantu?</h2>
+      <fieldset class="field">
+        <legend>Jenis bantuan <span class="hint">(opsional)</span></legend>
+        <div class="chips" id="jenis-chips"></div>
+      </fieldset>
+      <div class="field">
+        <label for="f-pesan">Ceritakan singkat</label>
+        <textarea class="in" id="f-pesan" name="pesan" rows="5" maxlength="600" placeholder="Contoh: Tolong titip beli obat flu di apotek dekat Stasiun Tebet, lalu antar ke rumah saya." aria-describedby="e-pesan"></textarea>
+        <p class="err" id="e-pesan" hidden></p>
+      </div>
+    </section>
+
+    <section class="card step" id="s3" data-step="3" hidden>
+      <h2 class="step-title" tabindex="-1">Di mana dan kapan?</h2>
+      <fieldset class="field">
+        <legend>Daerah</legend>
+        <div class="seg">
+          <label class="tile"><input type="radio" name="daerah" value="jaksel"><span class="tile-body"><b>Jakarta Selatan</b><small>Tebet, Kebayoran, Pasar Minggu, dan sekitarnya</small></span></label>
+          <label class="tile"><input type="radio" name="daerah" value="depok"><span class="tile-body"><b>Depok</b><small>Margonda, Beji, Sawangan, dan sekitarnya</small></span></label>
+        </div>
+        <p class="err" id="e-daerah" hidden></p>
+      </fieldset>
+      <div class="field">
+        <label for="f-kec">Kecamatan <span class="hint">(opsional)</span></label>
+        <select class="in" id="f-kec" name="kec" disabled><option value="">Pilih daerah dulu</option></select>
+      </div>
+      <div class="field">
+        <label for="f-alamat">Alamat atau patokan <span class="hint">(opsional)</span></label>
+        <input class="in" id="f-alamat" name="alamat" type="text" maxlength="120" placeholder="Dekat Stasiun Tebet">
+      </div>
+      <fieldset class="field">
+        <legend>Kapan?</legend>
+        <div class="chips" id="tgl-chips"></div>
+        <div class="row2">
+          <div class="field">
+            <label for="f-tanggal">Tanggal</label>
+            <input class="in" id="f-tanggal" name="tanggal" type="date" aria-describedby="e-tanggal">
+            <p class="err" id="e-tanggal" hidden></p>
+          </div>
+          <div class="field">
+            <label for="f-jam">Jam (WIB)</label>
+            <input class="in" id="f-jam" name="jam" type="time" aria-describedby="e-jam">
+            <p class="err" id="e-jam" hidden></p>
+          </div>
+        </div>
+        <div class="chips" id="jam-chips"></div>
+      </fieldset>
+      <p class="banner" id="e-form" hidden role="alert"></p>
+    </section>
+
+    <div class="hp" aria-hidden="true">
+      <label for="f-website">Jangan diisi</label>
+      <input id="f-website" name="website" type="text" tabindex="-1" autocomplete="off">
+    </div>
+
+    <div class="bar" id="bar">
+      <button type="button" class="btn ghost back" id="btn-back" hidden>Kembali</button>
+      <button type="submit" class="btn" id="btn-next">Lanjut</button>
+    </div>
+  </form>
+
+  <section id="result" hidden aria-label="Permintaan terkirim">
+    <div class="sent">
+      <h2 tabindex="-1" id="sent-title">Permintaan terkirim</h2>
+      <p id="sent-sub">Permintaanmu sudah masuk ke kami.</p>
+    </div>
+    <div id="nota"></div>
+    <div class="actions" id="actions"></div>
+    <div id="manual" hidden>
+      <label class="lbl" for="manual-text">Salin pesan ini</label>
+      <textarea class="in" id="manual-text" rows="9" readonly></textarea>
+    </div>
+    <div class="after" id="after"></div>
+  </section>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/common.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

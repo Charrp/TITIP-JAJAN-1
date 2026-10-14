@@ -1,0 +1,23 @@
+{
+  "name": "tolong-dong",
+  "version": "1.1.0",
+  "description": "Form pesanan Tolong Dong, papan permintaan, dan pembayaran",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.0",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
