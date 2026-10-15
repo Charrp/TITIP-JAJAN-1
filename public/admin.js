@@ -12,7 +12,7 @@
 
   var state = {
     authed: false, tab: 'papan', items: null, sig: '', seen: null, fresh: {}, unread: 0,
-    fs: 'semua', fd: 'semua', fb: 'semua', payinfo: '', confirm: null,
+    maps: {}, fs: 'semua', fd: 'semua', fb: 'semua', payinfo: '', confirm: null,
     busy: new Set(), draft: {}, pasteSaving: false, pollTimer: null, polling: false, lastSaved: ''
   };
 
@@ -255,10 +255,13 @@
       h('dl', { class: 'meta' },
         it.kode ? metaRow('Nota', it.kode) : null,
         metaRow('Daerah', T.daerahText(it) || '-'),
-        it.alamat ? metaRow('Alamat', [h('span', null, it.alamat), h('a', { class: 'copy maps', href: T.mapsUrl(it), target: '_blank', rel: 'noopener' }, 'Buka Maps')]) : null,
+        it.alamat ? metaRow('Alamat', [h('span', null, it.alamat),
+          h('button', { type: 'button', class: 'copy', 'aria-expanded': String(!!state.maps[it.id]), onclick: function () { state.maps[it.id] = !state.maps[it.id]; renderBoard(); } }, state.maps[it.id] ? 'Tutup peta' : 'Lihat peta'),
+          h('a', { class: 'copy maps', href: T.mapsUrl(it) }, 'Buka Maps')]) : null,
         metaRow('HP', phone),
         it.email ? metaRow('Email', it.email) : null,
         Number(it.biaya) > 0 ? metaRow('Bayar', T.rp(it.biaya) + ', ' + (it.bayar === 'lunas' ? 'lunas' : 'belum dibayar')) : null),
+      it.alamat && state.maps[it.id] ? h('div', { class: 'mapbox' }, h('iframe', { src: T.mapsEmbedUrl(it), loading: 'lazy', referrerpolicy: 'no-referrer', title: 'Peta ' + it.alamat })) : null,
       acts);
   }
 

@@ -1,311 +1,324 @@
-'use strict';
+/* Halaman pelanggan: form tiga langkah yang mengirim pesanan ke server. */
+(function () {
+  'use strict';
+  var T = window.TD, $ = T.$, h = T.h;
 
-/*
- * Inti aplikasi: menerima Request standar web, mengembalikan Response standar web.
- * Dipakai oleh server Node (server.js) dan Cloudflare Worker (worker.mjs).
- * Halaman statis (HTML, CSS, JS) disajikan oleh masing-masing adaptor.
- */
+  var DAERAH = T.DAERAH;
+  var JAM_PRESET = [['Pagi', '09:00'], ['Siang', '13:00'], ['Sore', '16:00'], ['Malam', '19:00']];
+  var STEP_LABEL = ['Data kamu', 'Bantuan', 'Waktu dan tempat'];
+  var STEP_FIELDS = { 1: ['f-nama', 'f-hp', 'f-email'], 2: ['f-pesan'], 3: ['daerah', 'f-tanggal', 'f-jam'] };
+  var ALL_FIELDS = STEP_FIELDS[1].concat(STEP_FIELDS[2], STEP_FIELDS[3]);
+  /* Nama kolom dari server -> id isian di halaman */
+  var SERVER_KEY = { nama: 'f-nama', hp: 'f-hp', email: 'f-email', pesan: 'f-pesan', daerah: 'daerah', tanggal: 'f-tanggal', jam: 'f-jam' };
 
-const V = require('./validate');
+  var state = { step: 1, created: null, sending: false, cfg: { adminWa: '', payInfo: '' } };
+  var form = $('#wiz');
 
-const SESSION_DAYS = 7;
-const CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self' https://fonts.googleapis.com",
-  'font-src https://fonts.gstatic.com',
-  "img-src 'self' data:",
-  "connect-src 'self'",
-  'frame-src https://www.google.com https://maps.google.com',
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join('; ');
-
-class HttpError extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-  }
-}
-
-/* ---------- Kriptografi (WebCrypto, tersedia di Node 20+ dan Cloudflare Workers) ---------- */
-const enc = new TextEncoder();
-function b64url(buf) {
-  let s = '';
-  new Uint8Array(buf).forEach((x) => { s += String.fromCharCode(x); });
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-async function hmac(secret, msg) {
-  const key = await globalThis.crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return b64url(await globalThis.crypto.subtle.sign('HMAC', key, enc.encode(msg)));
-}
-async function sha256(s) { return new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', enc.encode(s))); }
-function eqBytes(a, b) {
-  if (a.length !== b.length) return false;
-  let d = 0;
-  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
-  return d === 0;
-}
-async function safeEqual(a, b) { return eqBytes(await sha256(a), await sha256(b)); }
-
-/* ---------- CSV ---------- */
-function csvCell(v) {
-  let s = v == null ? '' : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
-  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
-function fmtJakarta(ms) {
-  return new Date(Number(ms) + 7 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 16);
-}
-function buildCsv(items) {
-  const head = ['Nota', 'Dibuat (WIB)', 'Nama', 'No. HP', 'Email', 'Jenis', 'Permintaan', 'Daerah', 'Kecamatan', 'Alamat', 'Tanggal', 'Jam', 'Status', 'Biaya (Rp)', 'Metode', 'Status bayar', 'Dibayar (WIB)'];
-  const rows = items.map((i) => [
-    i.kode, fmtJakarta(i.createdAt), i.nama, i.hp, i.email, i.jenis, i.pesan,
-    V.DAERAH[i.daerah] ? V.DAERAH[i.daerah].nama : i.daerah, i.kec, i.alamat, i.tanggal, i.jam,
-    i.status, i.biaya, i.metode, i.bayar, i.dibayarAt ? fmtJakarta(i.dibayarAt) : '',
-  ]);
-  return '﻿' + [head].concat(rows).map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
-}
-
-/* ---------- Header keamanan ---------- */
-function secureHeaders(headers, opts) {
-  headers.set('X-Content-Type-Options', 'nosniff');
-  headers.set('Referrer-Policy', 'same-origin');
-  headers.set('X-Frame-Options', 'DENY');
-  if (opts.production) headers.set('Strict-Transport-Security', 'max-age=15552000');
-  if (opts.html) headers.set('Content-Security-Policy', CSP);
-  return headers;
-}
-
-/*
- * createHandler({ store, config, limiter, now })
- *  - store: lihat lib/store.js
- *  - config: lihat lib/config.js
- *  - limiter: lihat lib/limiter.js
- *  - now: fungsi jam (untuk tes)
- * Mengembalikan { handle(request) -> Response | null, decorate(response, html) -> Response }.
- * handle() mengembalikan null kalau jalurnya bukan milik API (adaptor lalu menyajikan file statis).
- */
-function createHandler({ store, config, limiter, now }) {
-  const clock = now || (() => Date.now());
-
-  function decorate(res, html) {
-    const h = new Headers(res.headers);
-    secureHeaders(h, { production: config.production, html: !!html });
-    return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
-  }
-  function json(status, obj, setCookie) {
-    const h = new Headers({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-    if (setCookie) h.append('Set-Cookie', setCookie);
-    secureHeaders(h, { production: config.production, html: false });
-    return new Response(JSON.stringify(obj), { status, headers: h });
-  }
-  function text(status, body, type, extra) {
-    const h = new Headers(Object.assign({ 'Content-Type': type, 'Cache-Control': 'no-store' }, extra || {}));
-    secureHeaders(h, { production: config.production, html: false });
-    return new Response(body, { status, headers: h });
-  }
-
-  function clientIp(request) {
-    const raw = request.headers.get(config.ipHeader || 'x-forwarded-for') || '';
-    return raw.split(',')[0].trim().slice(0, 64) || 'unknown';
-  }
-
-  async function readJson(request, max) {
-    const ct = String(request.headers.get('content-type') || '').toLowerCase();
-    if (!ct.startsWith('application/json')) throw new HttpError(415, 'Format data tidak didukung.');
-    const body = await request.text();
-    if (body.length > max) throw new HttpError(413, 'Data terlalu besar.');
-    if (!body) return {};
-    let v;
-    try { v = JSON.parse(body); } catch (e) { throw new HttpError(400, 'Format data salah.'); }
-    if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'Format data salah.');
-    return v;
-  }
-
-  /* Sesi admin: cookie bertanda tangan, tanpa penyimpanan di server. */
-  async function makeToken() {
-    const exp = clock() + SESSION_DAYS * 864e5;
-    return exp + '.' + await hmac(config.sessionSecret, 'admin.' + exp);
-  }
-  async function verifyToken(tok) {
-    const i = tok.indexOf('.');
-    if (i < 1) return false;
-    const exp = Number(tok.slice(0, i));
-    if (!(exp > clock())) return false;
-    const expected = await hmac(config.sessionSecret, 'admin.' + exp);
-    return eqBytes(enc.encode(tok.slice(i + 1)), enc.encode(expected));
-  }
-  function getCookie(request, name) {
-    const raw = String(request.headers.get('cookie') || '');
-    for (const part of raw.split(';')) {
-      const i = part.indexOf('=');
-      if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
-    }
-    return '';
-  }
-  function cookieHeader(value, maxAge) {
-    return `td_admin=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}` + (config.production ? '; Secure' : '');
-  }
-  async function isAdmin(request) {
-    const tok = getCookie(request, 'td_admin');
-    return !!tok && verifyToken(tok);
-  }
-
-  async function api(request, p, method) {
-    const t = clock();
-    const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-
-    if (p === '/api/config') {
-      if (method !== 'GET') throw new HttpError(405, 'Metode tidak didukung.');
-      let payInfo = '';
-      try { payInfo = await store.getSetting('pay_info'); } catch (e) { console.error('Gagal membaca info pembayaran:', e.message); }
-      return json(200, { adminWa: config.adminWa, payInfo });
-    }
-
-    if (p === '/api/requests') {
-      if (method !== 'POST') throw new HttpError(405, 'Metode tidak didukung.');
-      const ip = clientIp(request);
-      if (!(await limiter.allow('order:ip:' + ip, 8, 15 * 60e3, t)) || !(await limiter.allow('order:all', 300, 3600e3, t))) {
-        throw new HttpError(429, 'Terlalu banyak pesanan dari perangkat ini. Coba lagi beberapa menit lagi.');
+  /* ---------- Pengaturan dari server (nomor WA, info bayar) ---------- */
+  function loadConfig() {
+    return T.api('GET', '/api/config', undefined, 15000).then(function (r) {
+      if (r.status === 200 && r.data) {
+        state.cfg.adminWa = String(r.data.adminWa || '');
+        state.cfg.payInfo = String(r.data.payInfo || '');
       }
-      const body = await readJson(request, 8 * 1024);
-      if (body.website) return json(200, { ok: true, kode: 'TD-0000-XXX', createdAt: t }); /* jebakan untuk bot */
-      const { value, errors } = V.validateOrder(body, { allowPast: false, nowMs: t });
-      if (errors) return json(400, { error: 'validasi', fields: errors });
-      const created = await store.create(value, { nowMs: t, md: V.jakartaParts(t).md, source: 'web' });
-      return json(201, { ok: true, kode: created.kode, createdAt: created.createdAt });
-    }
-
-    if (!p.startsWith('/api/admin/')) throw new HttpError(404, 'Tidak ditemukan.');
-
-    /* Semua perubahan admin wajib membawa header khusus (perlindungan CSRF tambahan). */
-    if (method !== 'GET' && method !== 'HEAD' && request.headers.get('x-requested-with') !== 'tolong-dong') {
-      throw new HttpError(403, 'Permintaan ditolak.');
-    }
-
-    if (p === '/api/admin/login') {
-      if (method !== 'POST') throw new HttpError(405, 'Metode tidak didukung.');
-      const ip = clientIp(request);
-      if ((await limiter.count('lf:' + ip, 10 * 60e3, t)) >= 5 || (await limiter.count('lf:all', 10 * 60e3, t)) >= 30) {
-        throw new HttpError(429, 'Terlalu banyak percobaan. Tunggu beberapa menit lalu coba lagi.');
-      }
-      const body = await readJson(request, 2 * 1024);
-      if (!(await safeEqual(String(body.password || ''), config.adminPassword))) {
-        await limiter.add('lf:' + ip, 10 * 60e3, t);
-        await limiter.add('lf:all', 10 * 60e3, t);
-        throw new HttpError(401, 'Password salah.');
-      }
-      await limiter.clear('lf:' + ip);
-      return json(200, { ok: true }, cookieHeader(await makeToken(), SESSION_DAYS * 86400));
-    }
-
-    if (p === '/api/admin/logout') {
-      if (method !== 'POST') throw new HttpError(405, 'Metode tidak didukung.');
-      return json(200, { ok: true }, cookieHeader('', 0));
-    }
-
-    if (!(await isAdmin(request))) throw new HttpError(401, 'Perlu login.');
-
-    if (p === '/api/admin/me') {
-      if (method !== 'GET') throw new HttpError(405, 'Metode tidak didukung.');
-      return json(200, { ok: true });
-    }
-
-    if (p === '/api/admin/requests') {
-      if (method === 'GET') return json(200, { items: await store.list() });
-      if (method === 'POST') {
-        const body = await readJson(request, 8 * 1024);
-        const { value, errors } = V.validateOrder(body, { allowPast: true, nowMs: t });
-        if (errors) return json(400, { error: 'validasi', fields: errors });
-        const kode = V.cleanKode(body.kode);
-        try {
-          const created = await store.create(value, { nowMs: t, md: V.jakartaParts(t).md, source: 'manual', kode });
-          return json(201, { ok: true, item: created });
-        } catch (e) {
-          if (e.code === 'DUPLICATE_KODE') return json(409, { error: `Nota ${kode} sudah ada di papan.` });
-          throw e;
-        }
-      }
-      throw new HttpError(405, 'Metode tidak didukung.');
-    }
-
-    const m = p.match(/^\/api\/admin\/requests\/([A-Za-z0-9-]{8,64})$/);
-    if (m) {
-      const id = m[1];
-      if (method === 'DELETE') {
-        const ok = await store.remove(id);
-        if (!ok) throw new HttpError(404, 'Permintaan tidak ditemukan.');
-        return json(200, { ok: true });
-      }
-      if (method === 'PATCH') {
-        const body = await readJson(request, 2 * 1024);
-        const patch = {}; const fields = {};
-        if (has(body, 'status')) { if (V.STATUS.includes(body.status)) patch.status = body.status; else fields.status = 'Status tidak dikenal.'; }
-        if (has(body, 'biaya')) {
-          const n = Number(body.biaya);
-          if (Number.isInteger(n) && n >= 0 && n <= 999999999) patch.biaya = n; else fields.biaya = 'Biaya harus angka bulat, dari 0 sampai 999.999.999.';
-        }
-        if (has(body, 'metode')) {
-          const mt = String(body.metode == null ? '' : body.metode);
-          if (mt === '' || V.METODE.includes(mt)) patch.metode = mt; else fields.metode = 'Metode tidak dikenal.';
-        }
-        if (has(body, 'bayar')) { if (V.BAYAR.includes(body.bayar)) patch.bayar = body.bayar; else fields.bayar = 'Status bayar tidak dikenal.'; }
-        if (Object.keys(fields).length) return json(400, { error: 'validasi', fields });
-        if (!Object.keys(patch).length) return json(400, { error: 'Tidak ada yang diubah.' });
-        const current = await store.get(id);
-        if (!current) throw new HttpError(404, 'Permintaan tidak ditemukan.');
-        const biaya = patch.biaya != null ? patch.biaya : current.biaya;
-        if (patch.bayar === 'lunas') {
-          if (!(biaya > 0)) throw new HttpError(400, 'Isi biaya dulu sebelum menandai lunas.');
-          if (current.bayar !== 'lunas') patch.dibayar_at = t;
-        } else if (patch.bayar === 'belum') {
-          patch.dibayar_at = null;
-        } else if (current.bayar === 'lunas' && !(biaya > 0)) {
-          throw new HttpError(400, 'Batalkan status lunas dulu sebelum mengosongkan biaya.');
-        }
-        const updated = await store.update(id, patch);
-        return json(200, { ok: true, item: updated });
-      }
-      throw new HttpError(405, 'Metode tidak didukung.');
-    }
-
-    if (p === '/api/admin/settings') {
-      if (method === 'GET') return json(200, { payInfo: await store.getSetting('pay_info') });
-      if (method === 'PUT') {
-        const body = await readJson(request, 4 * 1024);
-        await store.setSetting('pay_info', V.cleanText(body.payInfo, 300));
-        return json(200, { ok: true });
-      }
-      throw new HttpError(405, 'Metode tidak didukung.');
-    }
-
-    if (p === '/api/admin/export.csv') {
-      if (method !== 'GET') throw new HttpError(405, 'Metode tidak didukung.');
-      const csv = buildCsv(await store.list(2000));
-      const name = `pesanan-tolong-dong-${V.jakartaParts(t).ymd}.csv`;
-      return text(200, csv, 'text/csv; charset=utf-8', { 'Content-Disposition': `attachment; filename="${name}"` });
-    }
-
-    throw new HttpError(404, 'Tidak ditemukan.');
+    }, function () { /* tidak fatal */ });
   }
 
-  async function handle(request) {
+  /* ---------- Form ---------- */
+  T.JENIS.forEach(function (j) {
+    $('#jenis-chips').append(h('label', { class: 'chip' }, h('input', { type: 'radio', name: 'jenis', value: j }), h('span', null, j)));
+  });
+  var tglBtns = [['Hari ini', 0], ['Besok', 1], ['Lusa', 2]].map(function (x) {
+    var b = h('button', { type: 'button', class: 'pill-btn', 'aria-pressed': 'false' }, x[0]);
+    b.addEventListener('click', function () { setField('f-tanggal', T.ymd(T.addDays(new Date(), x[1]))); });
+    b.dataset.off = x[1];
+    $('#tgl-chips').append(b);
+    return b;
+  });
+  var jamBtns = JAM_PRESET.map(function (x) {
+    var b = h('button', { type: 'button', class: 'pill-btn', 'aria-pressed': 'false' }, x[0] + ' ' + T.fmtJam(x[1]));
+    b.addEventListener('click', function () { setField('f-jam', x[1]); });
+    b.dataset.val = x[1];
+    $('#jam-chips').append(b);
+    return b;
+  });
+  $('#f-tanggal').min = T.ymd(new Date());
+
+  function setField(id, val) {
+    var el = document.getElementById(id);
+    el.value = val;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function syncPressed() {
+    var t = $('#f-tanggal').value, j = $('#f-jam').value;
+    tglBtns.forEach(function (b) { b.setAttribute('aria-pressed', String(t === T.ymd(T.addDays(new Date(), Number(b.dataset.off))))); });
+    jamBtns.forEach(function (b) { b.setAttribute('aria-pressed', String(j === b.dataset.val)); });
+  }
+  function fillKec(daerah) {
+    var sel = $('#f-kec');
+    sel.replaceChildren();
+    var d = DAERAH[daerah];
+    if (!d) { sel.append(h('option', { value: '' }, 'Pilih daerah dulu')); sel.disabled = true; return; }
+    sel.disabled = false;
+    sel.append(h('option', { value: '' }, 'Pilih kecamatan'));
+    d.kec.forEach(function (k) { sel.append(h('option', { value: k }, k)); });
+  }
+  function readForm() {
+    function g(id) { return document.getElementById(id).value.trim(); }
+    function rad(n) { var r = form.querySelector('input[name="' + n + '"]:checked'); return r ? r.value : ''; }
+    return {
+      nama: g('f-nama'), hp: g('f-hp'), email: g('f-email'), jenis: rad('jenis'), pesan: g('f-pesan'),
+      daerah: rad('daerah'), kec: g('f-kec'), alamat: g('f-alamat'),
+      tanggal: document.getElementById('f-tanggal').value, jam: document.getElementById('f-jam').value
+    };
+  }
+  /* Pemeriksaan cepat di browser. Server tetap memeriksa ulang semuanya. */
+  function validate(v, step) {
+    var e = {};
+    if (step === 1) {
+      if (v.nama.length < 2) e['f-nama'] = 'Tulis nama kamu, minimal 2 huruf.';
+      if (!T.normHp(v.hp)) e['f-hp'] = 'Nomor HP belum benar. Tulis seperti 0812 3456 7890.';
+      if (v.email && !T.EMAIL.test(v.email)) e['f-email'] = 'Format email belum benar. Contoh: nama@email.com.';
+    }
+    if (step === 2) {
+      if (v.pesan.length < 8) e['f-pesan'] = 'Ceritakan sedikit lebih jelas apa yang perlu dibantu.';
+    }
+    if (step === 3) {
+      if (!v.daerah) e.daerah = 'Pilih Jakarta Selatan atau Depok.';
+      if (!v.tanggal) e['f-tanggal'] = 'Pilih tanggal.';
+      else if (T.dayDiff(v.tanggal) < 0) e['f-tanggal'] = 'Tanggal itu sudah lewat. Pilih hari ini atau sesudahnya.';
+      if (!v.jam) e['f-jam'] = 'Pilih jam.';
+      else if (v.tanggal && T.dayDiff(v.tanggal) === 0) {
+        var s = T.parseSched(v.tanggal, v.jam);
+        if (s && s <= new Date()) e['f-jam'] = 'Jam itu sudah lewat. Pilih jam setelah sekarang.';
+      }
+    }
+    return e;
+  }
+  function errEl(key) { return document.getElementById('e-' + key.replace(/^f-/, '')); }
+  function setError(key, msg) {
+    var el = errEl(key), input = document.getElementById(key);
+    if (msg) { el.textContent = msg; el.hidden = false; if (input) input.setAttribute('aria-invalid', 'true'); }
+    else { el.hidden = true; if (input) input.removeAttribute('aria-invalid'); }
+  }
+  function formError(msg) {
+    var el = $('#e-form');
+    if (msg) { el.textContent = msg; el.hidden = false; } else { el.hidden = true; }
+  }
+  function showErrors(errs, step) {
+    var keys = STEP_FIELDS[step];
+    keys.forEach(function (k) { setError(k, errs[k]); });
+    var first = keys.filter(function (k) { return errs[k]; })[0];
+    if (!first) return;
+    var target = first === 'daerah' ? form.querySelector('input[name="daerah"]') : document.getElementById(first);
+    if (target) target.focus();
+  }
+
+  /* ---------- Langkah ---------- */
+  function renderSteps() {
+    var ol = $('#steps');
+    ol.replaceChildren();
+    STEP_LABEL.forEach(function (label, i) {
+      var n = i + 1;
+      var li = h('li', { class: n < state.step ? 'done' : (n === state.step ? 'cur' : '') }, label);
+      if (n === state.step) li.setAttribute('aria-current', 'step');
+      ol.append(li);
+    });
+  }
+  function reduceMotion() { return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  function go(n, focusTitle) {
+    state.step = n;
+    [1, 2, 3].forEach(function (i) { $('#s' + i).hidden = i !== n; });
+    $('#btn-back').hidden = n === 1;
+    $('#btn-next').textContent = n === 3 ? 'Kirim permintaan' : 'Lanjut';
+    $('#intro').hidden = n !== 1;
+    renderSteps();
+    if (focusTitle) {
+      $('#s' + n + ' .step-title').focus({ preventScroll: true });
+      window.scrollTo({ top: 0, behavior: reduceMotion() ? 'auto' : 'smooth' });
+    }
+  }
+  function showForm(show) {
+    form.hidden = !show;
+    $('#steps').hidden = !show;
+    $('#result').hidden = show;
+    $('#intro').hidden = show ? state.step !== 1 : true;
+  }
+
+  form.addEventListener('input', function (ev) {
+    var t = ev.target, id = t && t.id;
+    if (id && ALL_FIELDS.indexOf(id) >= 0) setError(id, '');
+    if (t && t.name === 'daerah') { setError('daerah', ''); fillKec(t.value); }
+    formError('');
+    syncPressed();
+  });
+  form.addEventListener('change', function (ev) {
+    if (ev.target && ev.target.name === 'daerah') fillKec(ev.target.value);
+  });
+  $('#btn-back').addEventListener('click', function () { if (state.step > 1 && !state.sending) go(state.step - 1, true); });
+
+  function setSending(on) {
+    state.sending = on;
+    var b = $('#btn-next');
+    b.disabled = on;
+    b.textContent = on ? 'Mengirim…' : 'Kirim permintaan';
+    $('#btn-back').disabled = on;
+  }
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (state.sending) return;
+    var v = readForm(), errs = validate(v, state.step);
+    showErrors(errs, state.step);
+    if (Object.keys(errs).length) return;
+    if (state.step < 3) { go(state.step + 1, true); return; }
+    var e1 = validate(v, 1), e2 = validate(v, 2);
+    if (Object.keys(e1).length) { go(1, true); showErrors(e1, 1); return; }
+    if (Object.keys(e2).length) { go(2, true); showErrors(e2, 2); return; }
+    send(v);
+  });
+
+  function send(v) {
+    formError('');
+    setSending(true);
+    var payload = {
+      nama: v.nama, hp: v.hp, email: v.email, jenis: v.jenis, pesan: v.pesan,
+      daerah: v.daerah, kec: v.kec, alamat: v.alamat, tanggal: v.tanggal, jam: v.jam,
+      website: document.getElementById('f-website').value
+    };
+    T.api('POST', '/api/requests', payload).then(function (r) {
+      if (r.status === 201 || r.status === 200) {
+        state.created = {
+          nama: v.nama, hp: T.normHp(v.hp), email: v.email, jenis: v.jenis, pesan: v.pesan,
+          daerah: v.daerah, kec: v.kec, alamat: v.alamat, tanggal: v.tanggal, jam: v.jam,
+          kode: String(r.data.kode || ''), createdAt: Number(r.data.createdAt) || Date.now()
+        };
+        if ($('#f-ingat').checked) T.lsSet('profil', JSON.stringify({ nama: v.nama, hp: v.hp, email: v.email })); else T.lsDel('profil');
+        showForm(false);
+        renderResult();
+        window.scrollTo({ top: 0, behavior: reduceMotion() ? 'auto' : 'smooth' });
+        $('#sent-title').focus({ preventScroll: true });
+        return;
+      }
+      if (r.status === 400 && r.data && r.data.fields) { showServerErrors(r.data.fields); return; }
+      formError(r.data && r.data.error ? r.data.error : 'Permintaan belum bisa dikirim. Coba lagi sebentar.');
+    }, function (e) {
+      formError(e.message === 'timeout'
+        ? 'Server lagi bangun dan butuh waktu. Tunggu sebentar lalu tekan Kirim permintaan lagi.'
+        : 'Tidak ada koneksi ke server. Cek internet kamu lalu coba lagi.');
+    }).then(function () { setSending(false); });
+  }
+
+  function showServerErrors(fields) {
+    var step = 3, firstKey = null;
+    Object.keys(fields).forEach(function (k) {
+      var id = SERVER_KEY[k];
+      if (!id) return;
+      setError(id, fields[k]);
+      [1, 2, 3].forEach(function (s) { if (STEP_FIELDS[s].indexOf(id) >= 0 && s < step) step = s; });
+      if (!firstKey) firstKey = id;
+    });
+    go(step, true);
+    if (firstKey) {
+      var target = firstKey === 'daerah' ? form.querySelector('input[name="daerah"]') : document.getElementById(firstKey);
+      if (target) target.focus();
+    }
+  }
+
+  /* ---------- Layar hasil ---------- */
+  function buildMessage(c) {
+    var L = ['Halo, aku mau minta tolong.', ''];
+    L.push('Nama: ' + c.nama);
+    L.push('No. HP: ' + T.fmtHp(c.hp));
+    if (c.email) L.push('Email: ' + c.email);
+    L.push('Bantuan: ' + (c.jenis ? c.jenis + '. ' : '') + c.pesan);
+    L.push('Daerah: ' + T.daerahText(c));
+    if (c.alamat) L.push('Alamat: ' + c.alamat);
+    L.push('Waktu: ' + T.fullTanggal(c.tanggal) + ', ' + T.fmtJam(c.jam) + ' WIB');
+    L.push('Nota: ' + c.kode);
+    return L.join('\n');
+  }
+  function nrow(label, value) { return h('div', { class: 'nrow' }, h('dt', null, label), h('dd', null, value)); }
+  function manualCopy(text) {
+    var box = $('#manual'), ta = $('#manual-text');
+    box.hidden = false; ta.value = text; ta.focus(); ta.select();
+    try { if (document.execCommand && document.execCommand('copy')) { T.toast('Pesan tersalin.'); return; } } catch (e) { /* lanjut */ }
+    T.toast('Salin otomatis tidak didukung di sini. Salin dari kotak di bawah.');
+  }
+
+  function renderResult() {
+    var c = state.created;
+    var wa = state.cfg.adminWa;
+    $('#sent-sub').textContent = wa
+      ? 'Permintaanmu sudah masuk ke papan kami. Biar lebih cepat, kirim juga nota ini lewat WhatsApp.'
+      : 'Permintaanmu sudah masuk ke papan kami. Kami akan menghubungi kamu lewat WhatsApp.';
+
+    var msgBox = h('div', { class: 'nota-msg' }, h('span', { class: 'lbl' }, 'Minta tolong'));
+    if (c.jenis) msgBox.append(h('span', { class: 'tag' }, c.jenis));
+    msgBox.append(h('div', { class: 'lined' }, c.pesan));
+    var rows = [nrow('Nama', c.nama), nrow('No. HP', T.fmtHp(c.hp))];
+    if (c.email) rows.push(nrow('Email', c.email));
+    rows.push(nrow('Daerah', T.daerahText(c)));
+    if (c.alamat) rows.push(nrow('Alamat', c.alamat));
+    rows.push(nrow('Jadwal', T.fullTanggal(c.tanggal) + ', ' + T.fmtJam(c.jam) + ' WIB'));
+    $('#nota').replaceChildren(
+      h('article', { class: 'nota' },
+        h('div', { class: 'nota-head' }, h('h2', null, 'Nota tolong'), h('span', { class: 'nota-no' }, c.kode)),
+        h('dl', { class: 'nota-rows' }, rows),
+        msgBox,
+        h('div', { class: 'nota-foot' }, h('span', null, 'Dibuat ' + T.stampTime(c.createdAt)), h('span', { class: 'stamp' }, 'Terkirim'))));
+
+    var msg = buildMessage(c);
+    var act = $('#actions');
+    act.replaceChildren();
+    var row = h('div', { class: 'row' });
+    if (wa) {
+      row.append(h('a', { class: 'btn', href: 'https://wa.me/' + wa + '?text=' + encodeURIComponent(msg), target: '_blank', rel: 'noopener' }, 'Kirim juga lewat WhatsApp'));
+      row.append(h('button', { type: 'button', class: 'btn ghost', onclick: function () { T.copyText(msg, 'Pesan tersalin. Tempel di WhatsApp.', manualCopy); } }, 'Salin pesan'));
+    } else {
+      row.append(h('button', { type: 'button', class: 'btn ghost', onclick: function () { T.copyText(msg, 'Pesan tersalin.', manualCopy); } }, 'Salin pesan'));
+    }
+    var row2 = h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn ghost', onclick: newRequest }, 'Buat permintaan baru'));
+    act.append(row, row2);
+
+    var after = $('#after');
+    after.replaceChildren(h('h3', null, 'Setelah ini'));
+    var li3 = [h('span', null, 'Kamu bayar sesuai rincian itu, bisa lewat transfer, QRIS, atau tunai.')];
+    if (state.cfg.payInfo) li3.push(h('div', { class: 'payinfo' }, state.cfg.payInfo));
+    after.append(h('ol', null,
+      h('li', null, h('span', null, 'Kami cek permintaanmu dan menghubungi kamu lewat WhatsApp untuk konfirmasi lokasi dan jadwal.')),
+      h('li', null, h('span', null, 'Kami kirim rincian biaya setelah semuanya jelas.')),
+      h('li', null, h('div', null, li3))));
+  }
+
+  function newRequest() {
+    state.created = null;
+    $('#manual').hidden = true;
+    form.reset();
+    fillKec('');
+    ALL_FIELDS.forEach(function (k) { setError(k, ''); });
+    formError('');
+    prefill();
+    syncPressed();
+    showForm(true);
+    go(1, true);
+  }
+  function prefill() {
+    var raw = T.lsGet('profil');
+    if (!raw) return;
     try {
-      const url = new URL(request.url);
-      const p = url.pathname.replace(/\/+$/, '') || '/';
-      if (p === '/healthz') return text(200, 'ok', 'text/plain; charset=utf-8');
-      if (p.startsWith('/api/')) return await api(request, p, request.method);
-      return null;
-    } catch (e) {
-      if (e instanceof HttpError) return json(e.status, { error: e.message });
-      console.error('Kesalahan server:', e && e.stack ? e.stack : e);
-      return json(500, { error: 'Terjadi kesalahan di server. Coba lagi sebentar.' });
-    }
+      var p = JSON.parse(raw);
+      if (p && typeof p === 'object') {
+        if (p.nama) $('#f-nama').value = String(p.nama).slice(0, 60);
+        if (p.hp) $('#f-hp').value = String(p.hp).slice(0, 20);
+        if (p.email) $('#f-email').value = String(p.email).slice(0, 80);
+        $('#f-ingat').checked = true;
+      }
+    } catch (e) { /* abaikan */ }
   }
 
-  return { handle, decorate, text };
-}
-
-module.exports = { createHandler, buildCsv, CSP };
+  prefill();
+  syncPressed();
+  go(1, false);
+  loadConfig();
+})();

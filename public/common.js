@@ -85,9 +85,15 @@
     return d.nama + (o.kec ? ', ' + o.kec : '');
   }
   /* Tautan Google Maps: alamat atau patokan + kecamatan + daerah, supaya hasil pencarian tepat. */
+  function mapsQuery(o) {
+    return [o.alamat, o.kec, DAERAH[o.daerah] ? DAERAH[o.daerah].nama : ''].filter(Boolean).join(', ');
+  }
   function mapsUrl(o) {
-    var q = [o.alamat, o.kec, DAERAH[o.daerah] ? DAERAH[o.daerah].nama : ''].filter(Boolean).join(', ');
-    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(mapsQuery(o));
+  }
+  /* Peta yang tampil di dalam halaman (tanpa membuka aplikasi Maps). */
+  function mapsEmbedUrl(o) {
+    return 'https://maps.google.com/maps?q=' + encodeURIComponent(mapsQuery(o)) + '&hl=id&z=16&output=embed';
   }
   function rp(n) { return 'Rp ' + String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
 
@@ -138,7 +144,7 @@
     $: $, pad: pad, lsGet: lsGet, lsSet: lsSet, lsDel: lsDel, h: h,
     ymd: ymd, addDays: addDays, splitYmd: splitYmd, parseSched: parseSched, dayDiff: dayDiff,
     fmtJam: fmtJam, labelTanggal: labelTanggal, fullTanggal: fullTanggal, stampTime: stampTime,
-    normHp: normHp, fmtHp: fmtHp, daerahText: daerahText, mapsUrl: mapsUrl, rp: rp,
+    normHp: normHp, fmtHp: fmtHp, daerahText: daerahText, mapsUrl: mapsUrl, mapsEmbedUrl: mapsEmbedUrl, rp: rp,
     toast: toast, copyText: copyText, api: api
   };
 })();
